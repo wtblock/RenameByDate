@@ -55,12 +55,36 @@ CString RenameFile( LPCTSTR lpszPathName )
 	const CString csFolder = GetFolder( lpszPathName );
 	const CString csExtension = GetExtension( lpszPathName );
 	const CString csDate = m_Date.Date;
-	const CString csPath = csFolder + csDate + csExtension;
+
+	int nCount = 0;
+
+	// loop until a unique filename is generated
+	do 
+	{
+		// the first time through, do the normal generation
+		if ( nCount++ == 0 )
+		{
+			value.Format( _T( "%s%s%s" ), csFolder, csDate, csExtension );
+
+		} else // after the first attempt, add the count to the filename
+		{
+			value.Format( _T( "%s%s_%02d%s" ), csFolder, csDate, nCount, csExtension );
+		}
+
+		// if the path does not exist, break out of the loop
+		if ( !::PathFileExists( value ))
+		{
+			break;
+		}
+
+	} while ( true );
+
+	// rename the file to the generated value
 	try
 	{
-		CFile::Rename( lpszPathName, csPath );
-		value = csPath;
+		CFile::Rename( lpszPathName, value );
 
+	// if the rename fails for any reason, return a blank value
 	} catch (...)
 	{
 		value = _T( "" );
@@ -226,7 +250,7 @@ void RecursePath( LPCTSTR path )
 				{
 					fout.WriteString
 					(
-						_T( "The file could not be renamed.\n" )
+						_T( "\nThe file could not be renamed.\n\n" )
 					);
 					continue;
 
