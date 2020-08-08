@@ -47,6 +47,91 @@ CString GetStringProperty( Gdiplus::Image* pImage, PROPID id )
 } // GetStringProperty
 
 /////////////////////////////////////////////////////////////////////////////
+// sets the time based on the given string which may not abide by the locale
+bool SetTime( CString csDate )
+{
+	bool value = false;
+
+	COleDateTime oDT;
+	COleDateTime::DateTimeStatus eStatus = COleDateTime::invalid;
+	if ( !csDate.IsEmpty() )
+	{
+		// this will fail if not formatted in the correct locale
+		oDT.ParseDateTime( csDate );
+		eStatus = oDT.GetStatus();
+
+		// if the date did not parse, try getting just the time string
+		// assuming the last portion of the string is the time since
+		// we do not know how the string is formatted
+		if ( eStatus != COleDateTime::valid )
+		{
+			// test to see if the string ends in AM or PM
+			const bool bAmPm = csDate.Right( 1 ).MakeLower() == _T( "m" );
+			CString csTime;
+			if ( bAmPm )
+			{
+				// something like 03:15:30 PM
+				csTime = csDate.Right( 11 );
+
+			} else // something like 03:15:30
+			{
+				csTime = csDate.Right( 8 );
+			}
+
+			// time alone should parse correctly and since time
+			// is all we are interested in at this point, that 
+			// is okay
+			oDT.ParseDateTime( csTime );
+			eStatus = oDT.GetStatus();
+		}
+
+		// if we have a valid status, update the time
+		if ( eStatus == COleDateTime::valid )
+		{
+			value = true;
+			m_Date.Hour = oDT.GetHour();
+			m_Date.Minute = oDT.GetMinute();
+			m_Date.Second = oDT.GetSecond();
+		}
+	}
+
+	return value;
+} // SetTime
+
+/////////////////////////////////////////////////////////////////////////////
+// get the current date taken, if any, from the given filename
+CString GetCurrentDateTaken( LPCTSTR lpszPathName )
+{
+	USES_CONVERSION;
+
+	CString value;
+
+	// smart pointer to the image representing this file
+	unique_ptr<Gdiplus::Image> pImage =
+		unique_ptr<Gdiplus::Image>
+		(
+			Gdiplus::Image::FromFile( T2CW( lpszPathName ) )
+		);
+
+	// test the date properties stored in the given image
+	CString csOriginal =
+		GetStringProperty( pImage.get(), PropertyTagExifDTOrig );
+	CString csDigitized =
+		GetStringProperty( pImage.get(), PropertyTagExifDTDigitized );
+
+	if ( SetTime( csOriginal ))
+	{
+		value = csOriginal;
+
+	} else if ( SetTime( csDigitized ))
+	{
+		value = csDigitized;
+	}
+
+	return value;
+} // GetCurrentDateTaken
+
+/////////////////////////////////////////////////////////////////////////////
 // rename the given file by the date time properties in CDate member class
 // called m_Date.
 CString RenameFile( LPCTSTR lpszPathName )
@@ -99,12 +184,6 @@ CString RenameFile( LPCTSTR lpszPathName )
 bool Save( LPCTSTR lpszPathName, Gdiplus::Image* pImage )
 {
 	USES_CONVERSION;
-
-	// test the new properties stored in the given image
-	const CString csOriginal =
-		GetStringProperty( pImage, PropertyTagExifDTOrig );
-	const CString csDigitized =
-		GetStringProperty( pImage, PropertyTagExifDTDigitized );
 
 	// save and overwrite the selected image file with current page
 	int iValue =
@@ -206,11 +285,16 @@ void RecursePath( LPCTSTR path )
 				CStdioFile fout( stdout );
 				fout.WriteString( csPath + _T( "\n" ) );
 
+				// use the hour, minute and second of the date taken instead of 
+				// modified time since this will be more accurate in some cases
+				const CString csDateTaken = GetCurrentDateTaken( csPath );
+
 				// modify our date/time information with the modified time
 				// of this file. This is to keep the names unique and in the
 				// orginal sequence, but depending on the source of the image
-				// will probably not be the same as the time taken which
-				// is unknown.
+				// will probably not be the same as the date taken which
+				// is unknown if csDateTaken is empty.
+				if ( csDateTaken.IsEmpty())
 				{
 					// the file's status contains the information we are 
 					// looking for.
