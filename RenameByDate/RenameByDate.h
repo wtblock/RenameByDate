@@ -15,8 +15,8 @@ using namespace Gdiplus;
 using namespace std;
 
 /////////////////////////////////////////////////////////////////////////////
-// this class records the date and time information provided by the command
-// line as well as the time information in each image file referenced
+// this class records the date and time information in each image file 
+// referenced
 class CDate
 {
 	// protected data
@@ -361,8 +361,8 @@ public:
 ULONG_PTR m_gdiplusToken;
 
 /////////////////////////////////////////////////////////////////////////////
-// this class parses the mask provided on the command line to determine
-// where in the filename the date and time information is encoded
+// this class records the date and time information in each image file 
+// referenced
 CDate m_Date;
 
 ///////////////////////////////////////////////////////////////////////////
