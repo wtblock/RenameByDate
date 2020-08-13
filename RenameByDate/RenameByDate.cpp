@@ -53,7 +53,7 @@ CString GetStringProperty( Gdiplus::Image* pImage, PROPID id )
 // shown in 24-hour format, and the date and time separated by one blank 
 // character (hex 20).
 // this method will set the m_Date member using a Date Taken formatted
-// string
+// string: "%Y:%m:%d %H:%M:%S"
 void CDate::SetDateTaken( CString csDate )
 {
 	// reset the m_Date to undefined state
@@ -192,6 +192,8 @@ CString RenameFile( LPCTSTR lpszPathName )
 	const CString csFolder = GetFolder( lpszPathName );
 	const CString csExtension = GetExtension( lpszPathName );
 	COleDateTime oDT = m_Date.DateAndTime;
+
+	// format the date in a globally sortable format suitable for a filename
 	const CString csDate = oDT.Format( _T( "%Y_%m_%d_%H_%M_%S" ));
 
 	int nCount = 0;
@@ -210,7 +212,7 @@ CString RenameFile( LPCTSTR lpszPathName )
 		}
 
 		// if the original pathname matches the generated name
-		// there is nothing to do
+		// there is nothing to do, so get out
 		if ( value == lpszPathName )
 		{
 			return value;
@@ -370,50 +372,60 @@ void RecursePath( LPCTSTR path )
 				CStdioFile fout( stdout );
 				fout.WriteString( csPath + _T( "\n" ) );
 
-				// get the file's Date Taken metadata first
+				// get the file's Date Taken metadata first and returns 
+				// and empty string on failure. The m_Date member is 
+				// fully populated if successful
 				const CString csDateTaken = GetCurrentDateTaken( csPath );
 
-				// modify our date/time information with the modified time
-				// of this file. This is to keep the names unique and in the
-				// original sequence, but depending on the source of the image
-				// will probably not be the same as the date taken which
-				// is unknown if csDateTaken is empty.
-				if ( csDateTaken.IsEmpty())
-				{
-					fout.WriteString
-					(
-						_T( "\n" )
-						_T( "Missing Date Taken metadata.\n" )
-						_T( "\n" )
-					);
-					continue;
-				}
-
-				// if we are using the file's Date Taken metadata
+				// if we are using the file's Date Taken metadata (no date
+				// information parameters on the command line)
 				if ( m_bUseDateTaken )
 				{
-					// set the date by the date taken
-					m_Date.Date = csDateTaken;
+					// if there is no date taken, we are out-of-luck
+					// so let the user know we aborted this file
+					if ( csDateTaken.IsEmpty() )
+					{
+						fout.WriteString
+						(
+							_T( ".\n" )
+							_T( "Missing Date Taken metadata.\n" )
+							_T( ".\n" )
+						);
 
+						continue;
+					}
 				} else // use the parameter date information
 				{
-					// protect the command line date information
-					const int nYear = m_Date.Year;
-					const int nMonth = m_Date.Month;
-					const int nDay = m_Date.Year;
+					// modify our date/time information with the modified time
+					// of this file. This is to keep the names unique and in the
+					// original sequence, but depending on the source of the image
+					// will probably not be the same as the date taken which
+					// is unknown if csDateTaken is empty.
+					if ( csDateTaken.IsEmpty() )
+					{
+						// the file's status contains the information we are 
+						// looking for which is the modification time.
+						CFileStatus fs;
 
-					// set the date by the date taken
-					m_Date.Date = csDateTaken;
+						// if successful, write the modification time to the
+						// member date class
+						if ( CFile::GetStatus( csPath, fs ) )
+						{
+							m_Date.Hour = fs.m_mtime.GetHour();
+							m_Date.Minute = fs.m_mtime.GetMinute();
+							m_Date.Second = fs.m_mtime.GetSecond();
+						}
+					}
 
 					// restore the command line date information
-					m_Date.Year = nYear;
-					m_Date.Month = nMonth;
-					m_Date.Day = nDay;
+					m_Date.Year = m_nYear;
+					m_Date.Month = m_nMonth;
+					m_Date.Day = m_nDay;
 				}
 
 				// get the date and time from the member date class which
-				// now contains the parameter date information as well 
-				// as the original modification time.
+				// should contain the date and time information to create
+				// the new filename
 				COleDateTime oDT = m_Date.DateAndTime;
 				COleDateTime::DateTimeStatus eStatus = oDT.GetStatus();
 
@@ -422,9 +434,9 @@ void RecursePath( LPCTSTR path )
 				{
 					fout.WriteString
 					(
-						_T( "\n" )
+						_T( ".\n" )
 						_T( "Invalid date and time.\n" )
-						_T( "\n" )
+						_T( ".\n" )
 					);
 					continue;
 				}
@@ -437,19 +449,19 @@ void RecursePath( LPCTSTR path )
 				{
 					fout.WriteString
 					(
-						_T( "\nThe file could not be renamed.\n\n" )
+						_T( ".\nThe file could not be renamed.\n.\n" )
 					);
 					continue;
 
-				} else if ( csNew == csPath ) // the filename did no change
+				} else if ( csNew == csPath ) // the filename did not change
 				{
 					const CString csData = GetDataName( csNew );
-					csOutput.Format( _T( "Filename unchanged: %s\n" ), csData );
+					csOutput.Format( _T( "Filename unchanged:\n\t%s\n" ), csData );
 
 				} else // let the user know about the new filename
 				{
 					const CString csData = GetDataName( csNew );
-					csOutput.Format( _T( "File renamed to: %s\n" ), csData );
+					csOutput.Format( _T( "File renamed to:\n\t%s\n" ), csData );
 				}
 
 				fout.WriteString( csOutput );
@@ -463,10 +475,10 @@ void RecursePath( LPCTSTR path )
 
 				// this formatted date will be written into the date
 				// properties of the new file
-				CString csDate = oDT.Format( _T( "%Y:%m:%d %H:%M:%S" ) );
+				CString csDate = m_Date.Date;
 
 				// update the user about the date being used
-				csOutput.Format( _T( "New Date: %s\n" ), csDate );
+				csOutput.Format( _T( "New Date:\n\t%s\n.\n" ), csDate );
 				fout.WriteString( csOutput );
 
 				// smart pointer to the image representing this file
@@ -605,6 +617,28 @@ int _tmain( int argc, TCHAR* argv[], TCHAR* envp[] )
 		fOut.WriteString
 		( 
 			_T( ".\n" ) 
+			_T( "A Windows command line program to rename file(s) using\n" )
+			_T( "  the given date or by the Date Taken metadata.\n" )
+			_T( ".\n" ) 
+			_T( "If date information is provided, the time portion\n" )
+			_T( "  comes from the Date Taken if available, otherwise\n" )
+			_T( "  the modification time is used. Also a \"Corrected\"\n" )
+			_T( "  folder will be created with the same filenames, but\n" )
+			_T( "  these files will have their Date Taken metadata set\n" )
+			_T( "  to match the renamed file.\n" )
+			_T( ".\n" )
+			_T( "If no date information is supplied, the date and time\n" )
+			_T( "  come from the Date Taken and will error out if no\n" )
+			_T( "  Date Taken is available.\n" )
+			_T( ".\n" )
+			_T( "The file format is: \"YYYY_MM_DD_HH_MM_SS\" to create\n" )
+			_T( "  files that will sort correctly by the date taken.\n" )
+			_T( ".\n" )
+		);
+
+		fOut.WriteString
+		( 
+			_T( ".\n" ) 
 			_T( "Usage:\n" )
 			_T( ".\n" )
 			_T( ".  RenameByDate pathname [year month day]\n" )
@@ -708,17 +742,34 @@ int _tmain( int argc, TCHAR* argv[], TCHAR* envp[] )
 			_T( ".\n" )
 		);
 
+		// 4 digit year command line parameter
+		m_nYear = -1;
+
+		// month of the year command line parameter (1..12)
+		m_nMonth = -1;
+
+		// day of the month command line parameter (0..31)
+		m_nDay = -1;
+
 	} else // year, month and day were provided
 	{
+		// 4 digit year command line parameter
+		m_nYear = _tstol( argv[ 2 ] );
+
+		// month of the year command line parameter (1..12)
+		m_nMonth = _tstol( argv[ 3 ] );
+
+		// day of the month command line parameter (0..31)
+		m_nDay = _tstol( argv[ 4 ] );
+
 		// record the given year
-		m_Date.Year = _tstol( argv[ 2 ] );
+		m_Date.Year = m_nYear;
 
 		// record the given month of the year
-		m_Date.Month = _tstol( argv[ 3 ] );
+		m_Date.Month = m_nMonth;
 
 		// record the given day of the month
-		m_Date.Day = _tstol( argv[ 4 ] );
-
+		m_Date.Day = m_nDay;
 
 		// If all of the date and time information is present,
 		// the Okay status of the date class will be set to true.
