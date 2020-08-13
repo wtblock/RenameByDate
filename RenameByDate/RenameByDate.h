@@ -15,14 +15,40 @@ using namespace Gdiplus;
 using namespace std;
 
 /////////////////////////////////////////////////////////////////////////////
-// this class records the date and time information in each image file 
-// referenced
+// this class creates a fast look up of the mime type and class ID as 
+// defined by GDI+ for common file extensions
 class CDate
 {
+	// protected definition
+protected:
+	typedef struct tagMonthLookup
+	{
+		CString m_csMonth;
+		int m_nMonth;
+
+	} MONTH_LOOKUP;
+
+	typedef enum
+	{
+		tnYear = 0,
+		tnMonth = tnYear + 1,
+		tnDay = tnMonth + 1,
+		tnHour = tnDay + 1,
+		tnMinute = tnHour + 1,
+		tnSecond = tnMinute + 1,
+	} TOKEN_NAME;
+
 	// protected data
 protected:
 	// date formatted as a string
 	CString m_csDate;
+
+	// The date and time when the original image data was generated.
+	// For a digital still camera, this is the date and time the picture 
+	// was taken or recorded. The format is "YYYY:MM:DD HH:MM:SS" with time 
+	// shown in 24-hour format, and the date and time separated by one blank 
+	// character (hex 20).
+	CString m_csDateTaken;
 
 	// 4 digit year
 	int m_nYear;
@@ -42,8 +68,11 @@ protected:
 	// second of the minute (0..59)
 	int m_nSecond;
 
-	// boolean indictator that all is well
+	// boolean indicator that all is well
 	bool m_bOkay;
+
+	// rapid month lookup
+	CKeyedCollection<CString, int> m_MonthLookup;
 
 	// public properties
 public:
@@ -54,11 +83,11 @@ public:
 		COleDateTime oDT = DateAndTime;
 		COleDateTime::DateTimeStatus eStatus = oDT.GetStatus();
 		bool bOkay = COleDateTime::DateTimeStatus::valid == eStatus;
-		
-		// if the status is good, format into a globally sortable format
+
+		// if the status is good, format into a string
 		if ( bOkay )
 		{
-			value = oDT.Format( _T( "%Y_%m_%d_%H_%M_%S" ) );
+			value = oDT.Format( _T( "%Y:%m:%d %H:%M:%S" ) );
 			m_csDate = value;
 		}
 
@@ -68,7 +97,7 @@ public:
 	inline void SetDate( CString value )
 	{
 		COleDateTime oDT;
-		if ( oDT.ParseDateTime( value ))
+		if ( oDT.ParseDateTime( value ) )
 		{
 			DateAndTime = oDT;
 			Okay = true;
@@ -163,7 +192,7 @@ public:
 	__declspec( property( get = GetSecond, put = SetSecond ) )
 		int Second;
 
-	// boolean indictator that all is well
+	// boolean indicator that all is well
 	inline bool GetOkay()
 	{
 		COleDateTime oDT( Year, Month, Day, Hour, Minute, Second );
@@ -171,12 +200,12 @@ public:
 		Okay = COleDateTime::DateTimeStatus::valid == eStatus;
 		return m_bOkay;
 	}
-	// boolean indictator that all is well
+	// boolean indicator that all is well
 	inline void SetOkay( bool value )
 	{
 		m_bOkay = value;
 	}
-	// boolean indictator that all is well
+	// boolean indicator that all is well
 	__declspec( property( get = GetOkay, put = SetOkay ) )
 		bool Okay;
 
@@ -208,8 +237,50 @@ public:
 	__declspec( property( get = GetDateAndTime, put = SetDateAndTime ) )
 		COleDateTime DateAndTime;
 
+	// The date and time when the original image data was generated.
+	// For a digital still camera, this is the date and time the picture 
+	// was taken or recorded. The format is "YYYY:MM:DD HH:MM:SS" with time 
+	// shown in 24-hour format, and the date and time separated by one blank 
+	// character (hex 20).
+	inline CString GetDateTaken()
+	{
+		return m_csDateTaken;
+	}
+	// The date and time when the original image data was generated.
+	// For a digital still camera, this is the date and time the picture 
+	// was taken or recorded. The format is "YYYY:MM:DD HH:MM:SS" with time 
+	// shown in 24-hour format, and the date and time separated by one blank 
+	// character (hex 20).
+	void SetDateTaken( CString csDate );
+	// The date and time when the original image data was generated.
+	// For a digital still camera, this is the date and time the picture 
+	// was taken or recorded. The format is "YYYY:MM:DD HH:MM:SS" with time 
+	// shown in 24-hour format, and the date and time separated by one blank 
+	// character (hex 20).
+	__declspec( property( get = GetDateTaken, put = SetDateTaken ) )
+		CString DateTaken;
+
 	// public methods
 public:
+	// return the month of the year (1..12) given the month's name
+	// or return 0 if one is not found
+	int GetMonthOfTheYear( CString month )
+	{
+		int value = 0;
+
+		// the key is the first three characters in lower case
+		const CString csKey = month.Left( 3 ).MakeLower();
+
+		// if the key exists in the cross reference, then lookup the
+		// month of the year (1..12)
+		if ( m_MonthLookup.Exists[ csKey ] )
+		{
+			value = *m_MonthLookup.find( csKey );
+		}
+
+		return value;
+	}
+
 	// constructor
 	CDate()
 	{
@@ -220,11 +291,37 @@ public:
 		Minute = 0;
 		Second = 0;
 
+		// create a lookup table for months
+		LPCTSTR months[] =
+		{
+			_T( "jan" ),
+			_T( "feb" ),
+			_T( "mar" ),
+			_T( "apr" ),
+			_T( "may" ),
+			_T( "jun" ),
+			_T( "jul" ),
+			_T( "aug" ),
+			_T( "sep" ),
+			_T( "oct" ),
+			_T( "nov" ),
+			_T( "dec" ),
+		};
+		const int nMonths = _countof( months );
+		for ( int nMonth = 0; nMonth < nMonths; nMonth++ )
+		{
+			m_MonthLookup.add
+			(
+				months[ nMonth ],
+				new int( nMonth + 1 )
+			);
+		}
+
 		Okay = false;
 	}
 };
 
-/////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////
 // this class creates a fast look up of the mime type and class ID as 
 // defined by GDI+ for common file extensions
 class CExtension
@@ -275,17 +372,17 @@ public:
 	__declspec( property( get = GetFileExtension, put = SetFileExtension ) )
 		CString FileExtension;
 
-	// image mime type associated with the current file extension
+	// image extension associated with the current file extension
 	inline CString GetMimeType()
 	{
 		return m_csMimeType;
 	}
-	// image mime type associated with the current file extension
+	// image extension associated with the current file extension
 	inline void SetMimeType( CString value )
 	{
 		m_csMimeType = value;
 	}
-	// image mime type associated with the current file extension
+	// get image extension associated with the current file extension
 	__declspec( property( get = GetMimeType, put = SetMimeType ) )
 		CString MimeType;
 
@@ -319,8 +416,6 @@ protected:
 public:
 	CExtension()
 	{
-		USES_CONVERSION;
-
 		// extension conversion table
 		static EXTENSION_LOOKUP ExtensionLookup[] =
 		{
@@ -356,8 +451,8 @@ public:
 	}
 };
 
-////////////////////////////////////////////////////////////////////////////
-// used for gdiplus libraray
+/////////////////////////////////////////////////////////////////////////////
+// used for gdiplus library
 ULONG_PTR m_gdiplusToken;
 
 /////////////////////////////////////////////////////////////////////////////
@@ -365,10 +460,16 @@ ULONG_PTR m_gdiplusToken;
 // referenced
 CDate m_Date;
 
-///////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////
 // this class creates a fast look up of the mime type and class ID as 
 // defined by GDI+ for common file extensions
 CExtension m_Extension;
+
+/////////////////////////////////////////////////////////////////////////////
+// true if the date is not specified on the command line and the Date Taken
+// is being used instead. In this case the "Corrected" folder will not be
+// created since the Date Taken is not being changed.
+bool m_bUseDateTaken;
 
 /////////////////////////////////////////////////////////////////////////////
 // the new folder under the image folder to contain the corrected images

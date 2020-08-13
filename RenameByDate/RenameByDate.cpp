@@ -14,7 +14,7 @@
 CWinApp theApp;
 
 /////////////////////////////////////////////////////////////////////////////
-// given an image pointer and an ASCII property ID, return the propery value
+// given an image pointer and an ASCII property ID, return the property value
 CString GetStringProperty( Gdiplus::Image* pImage, PROPID id )
 {
 	CString value;
@@ -47,56 +47,101 @@ CString GetStringProperty( Gdiplus::Image* pImage, PROPID id )
 } // GetStringProperty
 
 /////////////////////////////////////////////////////////////////////////////
-// sets the time based on the given string which may not abide by the locale
-bool SetTime( CString csDate )
+// The date and time when the original image data was generated.
+// For a digital still camera, this is the date and time the picture 
+// was taken or recorded. The format is "YYYY:MM:DD HH:MM:SS" with time 
+// shown in 24-hour format, and the date and time separated by one blank 
+// character (hex 20).
+// this method will set the m_Date member using a Date Taken formatted
+// string
+void CDate::SetDateTaken( CString csDate )
 {
-	bool value = false;
+	// reset the m_Date to undefined state
+	Year = -1;
+	Month = -1;
+	Day = -1;
+	Hour = 0;
+	Minute = 0;
+	Second = 0;
+	bool value = Okay;
 
-	COleDateTime oDT;
-	COleDateTime::DateTimeStatus eStatus = COleDateTime::invalid;
-	if ( !csDate.IsEmpty() )
+	// parse the date into a vector of string tokens
+	const CString csDelim( _T( ": " ) );
+	int nStart = 0;
+	vector<CString> tokens;
+
+	do
 	{
-		// this will fail if not formatted in the correct locale
-		oDT.ParseDateTime( csDate );
-		eStatus = oDT.GetStatus();
-
-		// if the date did not parse, try getting just the time string
-		// assuming the last portion of the string is the time since
-		// we do not know how the string is formatted
-		if ( eStatus != COleDateTime::valid )
+		const CString csToken = 
+				csDate.Tokenize( csDelim, nStart ).MakeLower();
+		if ( csToken.IsEmpty() )
 		{
-			// test to see if the string ends in AM or PM
-			const bool bAmPm = csDate.Right( 1 ).MakeLower() == _T( "m" );
-			CString csTime;
-			if ( bAmPm )
-			{
-				// something like 03:15:30 PM
-				csTime = csDate.Right( 11 );
-
-			} else // something like 03:15:30
-			{
-				csTime = csDate.Right( 8 );
-			}
-
-			// time alone should parse correctly and since time
-			// is all we are interested in at this point, that 
-			// is okay
-			oDT.ParseDateTime( csTime );
-			eStatus = oDT.GetStatus();
+			break;
 		}
 
-		// if we have a valid status, update the time
-		if ( eStatus == COleDateTime::valid )
-		{
-			value = true;
-			m_Date.Hour = oDT.GetHour();
-			m_Date.Minute = oDT.GetMinute();
-			m_Date.Second = oDT.GetSecond();
-		}
+		tokens.push_back( csToken );
+
+	} while ( true );
+
+	// there should be six tokens in the proper format of
+	// "YYYY:MM:DD HH:MM:SS"
+	const size_t tTokens = tokens.size();
+	if ( tTokens != 6 )
+	{
+		return;
 	}
 
-	return value;
-} // SetTime
+	// populate the date and time members with the values
+	// in the vector
+	TOKEN_NAME eToken = tnYear;
+	int nToken = 0;
+
+	for ( CString csToken : tokens )
+	{
+		int nValue = _tstol( csToken );
+
+		switch ( eToken )
+		{
+			case tnYear:
+			{
+				Year = nValue;
+				break;
+			}
+			case tnMonth:
+			{
+				Month = nValue;
+				break;
+			}
+			case tnDay:
+			{
+				Day = nValue;
+				break;
+			}
+			case tnHour:
+			{
+				Hour = nValue;
+				break;
+			}
+			case tnMinute:
+			{
+				Minute = nValue;
+				break;
+			}
+			case tnSecond:
+			{
+				Second = nValue;
+				break;
+			}
+		}
+
+		nToken++;
+		eToken = (TOKEN_NAME)nToken;
+	}
+
+	// this will be true if all of the values define a proper date and time
+	value = Okay;
+
+} // SetDateTaken
 
 /////////////////////////////////////////////////////////////////////////////
 // get the current date taken, if any, from the given filename
@@ -119,13 +164,20 @@ CString GetCurrentDateTaken( LPCTSTR lpszPathName )
 	CString csDigitized =
 		GetStringProperty( pImage.get(), PropertyTagExifDTDigitized );
 
-	if ( SetTime( csOriginal ))
+	// officially the original property is the date taken in this
+	// format: "YYYY:MM:DD HH:MM:SS"
+	m_Date.DateTaken = csOriginal;
+	if ( m_Date.Okay )
 	{
 		value = csOriginal;
 
-	} else if ( SetTime( csDigitized ))
+	} else // alternately use the date digitized
 	{
-		value = csDigitized;
+		m_Date.DateTaken = csDigitized;
+		if ( m_Date.Okay )
+		{
+			value = csDigitized;
+		}
 	}
 
 	return value;
@@ -139,7 +191,8 @@ CString RenameFile( LPCTSTR lpszPathName )
 	CString value;
 	const CString csFolder = GetFolder( lpszPathName );
 	const CString csExtension = GetExtension( lpszPathName );
-	const CString csDate = m_Date.Date;
+	COleDateTime oDT = m_Date.DateAndTime;
+	const CString csDate = oDT.Format( _T( "%Y_%m_%d_%H_%M_%S" ));
 
 	int nCount = 0;
 
@@ -154,6 +207,13 @@ CString RenameFile( LPCTSTR lpszPathName )
 		} else // after the first attempt, add the count to the filename
 		{
 			value.Format( _T( "%s%s_%02d%s" ), csFolder, csDate, nCount, csExtension );
+		}
+
+		// if the original pathname matches the generated name
+		// there is nothing to do
+		if ( value == lpszPathName )
+		{
+			return value;
 		}
 
 		// if the path does not exist, break out of the loop
@@ -239,12 +299,25 @@ void RecursePath( LPCTSTR path )
 	const CString csCorrected = GetCorrectedFolder();
 	const int nCorrected = GetCorrectedFolderLength();
 
-	CString csPathname( path );
-	csPathname.TrimRight( _T( "\\" ) );
+	// get the folder which will trim any wild card data
+	CString csPathname = GetFolder( path );
 
-	// build a string with wildcards
+	// wild cards are in use if the pathname does not equal the given path
+	const bool bWildCards = csPathname != path;
+	csPathname.TrimRight( _T( "\\" ) );
+	CString csData;
+
+	// build a string with wild-cards
 	CString strWildcard;
-	strWildcard.Format( _T( "%s\\*.*" ), path );
+	if ( bWildCards )
+	{
+		csData = GetDataName( path );
+		strWildcard.Format( _T( "%s\\%s" ), csPathname, csData );
+
+	} else // no wild cards, just a folder
+	{
+		strWildcard.Format( _T( "%s\\*.*" ), csPathname );
+	}
 
 	// start trolling for files we are interested in
 	CFileFind finder;
@@ -262,21 +335,33 @@ void RecursePath( LPCTSTR path )
 		// if it's a directory, recursively search it
 		if ( finder.IsDirectory() )
 		{
-			const CString str = finder.GetFilePath();
-
 			// do not recurse into the corrected folder
+			const CString str = 
+				finder.GetFilePath().TrimRight( _T( "\\" ) );;
 			if ( str.Right( nCorrected ) == csCorrected )
 			{
 				continue;
 			}
 
-			// recurse into the new directory
-			RecursePath( str );
+			// if wild cards are in use, build a path with the wild cards
+			if ( bWildCards )
+			{
+				CString csPath;
+				csPath.Format( _T( "%s\\%s" ), str, csData );
+
+				// recurse into the new directory with wild cards
+				RecursePath( csPath );
+
+			} else // recurse into the new directory
+			{
+				RecursePath( str );
+			}
 
 		} else // write the properties if it is a valid extension
 		{
 			const CString csPath = finder.GetFilePath();
 			const CString csExt = GetExtension( csPath ).MakeLower();
+			const CString csFile = GetFileName( csPath );
 
 			if ( -1 != csValidExt.Find( csExt ) )
 			{
@@ -285,34 +370,50 @@ void RecursePath( LPCTSTR path )
 				CStdioFile fout( stdout );
 				fout.WriteString( csPath + _T( "\n" ) );
 
-				// use the hour, minute and second of the date taken instead of 
-				// modified time since this will be more accurate in some cases
+				// get the file's Date Taken metadata first
 				const CString csDateTaken = GetCurrentDateTaken( csPath );
 
 				// modify our date/time information with the modified time
 				// of this file. This is to keep the names unique and in the
-				// orginal sequence, but depending on the source of the image
+				// original sequence, but depending on the source of the image
 				// will probably not be the same as the date taken which
 				// is unknown if csDateTaken is empty.
 				if ( csDateTaken.IsEmpty())
 				{
-					// the file's status contains the information we are 
-					// looking for.
-					CFileStatus fs;
+					fout.WriteString
+					(
+						_T( "\n" )
+						_T( "Missing Date Taken metadata.\n" )
+						_T( "\n" )
+					);
+					continue;
+				}
 
-					// if successful, write the modification time to the
-					// member date class
-					if ( CFile::GetStatus( csPath, fs ))
-					{
-						m_Date.Hour = fs.m_mtime.GetHour();
-						m_Date.Minute = fs.m_mtime.GetMinute();
-						m_Date.Second = fs.m_mtime.GetSecond();
-					}
+				// if we are using the file's Date Taken metadata
+				if ( m_bUseDateTaken )
+				{
+					// set the date by the date taken
+					m_Date.Date = csDateTaken;
+
+				} else // use the parameter date information
+				{
+					// protect the command line date information
+					const int nYear = m_Date.Year;
+					const int nMonth = m_Date.Month;
+					const int nDay = m_Date.Year;
+
+					// set the date by the date taken
+					m_Date.Date = csDateTaken;
+
+					// restore the command line date information
+					m_Date.Year = nYear;
+					m_Date.Month = nMonth;
+					m_Date.Day = nDay;
 				}
 
 				// get the date and time from the member date class which
 				// now contains the parameter date information as well 
-				// as the orginal modification time.
+				// as the original modification time.
 				COleDateTime oDT = m_Date.DateAndTime;
 				COleDateTime::DateTimeStatus eStatus = oDT.GetStatus();
 
@@ -321,7 +422,9 @@ void RecursePath( LPCTSTR path )
 				{
 					fout.WriteString
 					(
-						_T( "Invalid time extracted from filename.\n" )
+						_T( "\n" )
+						_T( "Invalid date and time.\n" )
+						_T( "\n" )
 					);
 					continue;
 				}
@@ -338,11 +441,24 @@ void RecursePath( LPCTSTR path )
 					);
 					continue;
 
+				} else if ( csNew == csPath ) // the filename did no change
+				{
+					const CString csData = GetDataName( csNew );
+					csOutput.Format( _T( "Filename unchanged: %s\n" ), csData );
+
 				} else // let the user know about the new filename
 				{
 					const CString csData = GetDataName( csNew );
 					csOutput.Format( _T( "File renamed to: %s\n" ), csData );
-					fout.WriteString( csOutput );
+				}
+
+				fout.WriteString( csOutput );
+
+				// if we are using the file's Date Taken metadata, then we do
+				// not need to create a corrected file with a new Date Taken
+				if ( m_bUseDateTaken )
+				{
+					continue;
 				}
 
 				// this formatted date will be written into the date
@@ -474,7 +590,10 @@ int _tmain( int argc, TCHAR* argv[], TCHAR* envp[] )
 	}
 
 	CStdioFile fOut( stdout );
-	if ( argc != 5 )
+
+	// five arguments if specifying year, month, and day
+	// two arguments if using the existing date taken
+	if ( argc != 5 && argc != 2 )
 	{
 		fOut.WriteString( _T( ".\n" ) );
 		fOut.WriteString
@@ -482,43 +601,85 @@ int _tmain( int argc, TCHAR* argv[], TCHAR* envp[] )
 			_T( "RenameByDate, Copyright (c) 2020, " )
 			_T( "by W. T. Block.\n" )
 		);
-		fOut.WriteString( _T( ".\n" ) );
-		fOut.WriteString( _T( "Usage:\n" ) );
-		fOut.WriteString( _T( ".\n" ) );
-		fOut.WriteString( _T( ".  RenameByDate pathname year month day\n" ) );
-		fOut.WriteString( _T( ".\n" ) );
-		fOut.WriteString( _T( "Where:\n" ) );
-		fOut.WriteString( _T( ".\n" ) );
+
 		fOut.WriteString
-		(
-			_T( ".  pathname is the root of the tree to be scanned\n" )
+		( 
+			_T( ".\n" ) 
+			_T( "Usage:\n" )
+			_T( ".\n" )
+			_T( ".  RenameByDate pathname [year month day]\n" )
+			_T( ".\n" )
+			_T( "Where:\n" )
+			_T( ".\n" )
 		);
+
 		fOut.WriteString
 		(
-			_T( ".  year is the four digit year the date\n" )
+			_T( ".  pathname is the root of the tree to be scanned, but\n" )
+			_T( ".  may contain wild cards like the following:\n" )
+			_T( ".    \"c:\\Picture\\DisneyWorldMary2 *.JPG\"\n" )
+			_T( ".  will process all files with that pattern, or\n" )
+			_T( ".    \"c:\\Picture\\DisneyWorldMary2 231.JPG\"\n" )
+			_T( ".  will process a single defined image file.\n" )
+			_T( ".  (NOTE: using wild cards will prevent recursion\n" )
+			_T( ".    into sub-folders because the folders will likely\n" )
+			_T( ".    not fall into the same pattern and therefore\n" )
+			_T( ".    sub-folders will not be found by the search).\n" )
+		);
+
+		fOut.WriteString
+		(
+			_T( ".  year, month, and day are optional:\n" )
+			_T( ".    if one is specified they all must\n" )
+			_T( ".      be specified.\n" )
+			_T( ".    if they are not specified, the date\n" )
+			_T( ".      taken metadata will be used instead.\n" )
+			_T( ".  year is the four digit year of the date\n" )
 			_T( ".  month is the month of the year (1..12)\n" )
 			_T( ".  day is the day of the month (1..31)\n" )
 			_T( ".\n" )
 			_T( ".The program will error out if the date is invalid, \n" )
-			_T( ".  for example day 31 in the month of September, or" )
-			_T( ".  day 29 in a non-leap year.\n" )
+			_T( ".  for example day 31 in the month of September, or\n" )
+			_T( ".  day 29 of February in a non-leap year.\n" )
+			_T( ".\n" )
 		);
-		fOut.WriteString( _T( ".\n" ) );
 		return 3;
 	}
 
 	// display the executable path
 	CString csMessage;
-	csMessage.Format( _T( "Executable pathname: %s\n" ), argv[ 0 ] );
-	fOut.WriteString( _T( ".\n" ) );
-	fOut.WriteString( csMessage );
-	fOut.WriteString( _T( ".\n" ) );
+	//csMessage.Format( _T( "Executable pathname: %s\n" ), argv[ 0 ] );
+	//fOut.WriteString( _T( ".\n" ) );
+	//fOut.WriteString( csMessage );
+	//fOut.WriteString( _T( ".\n" ) );
 
-	// retrieve the pathname and validate the pathname exists
+	// retrieve the pathname which may include wild cards
 	CString csPath = argv[ 1 ];
-	if ( !::PathFileExists( csPath ) )
+
+	// trim off any wild card data
+	const CString csFolder = GetFolder( csPath );
+
+	// test for current folder character (a period)
+	bool bExists = csPath == _T( "." );
+
+	// if it is a period, add a wild card of *.* to retrieve
+	// all folders and files
+	if ( bExists )
 	{
-		csMessage.Format( _T( "Invalid pathname: %s\n" ), csPath );
+		csPath = _T( ".\\*.*" );
+
+	// if it is not a period, test to see if the folder exists
+	} else
+	{
+		if ( ::PathFileExists( csFolder ) )
+		{
+			bExists = true;
+		}
+	}
+
+	if ( !bExists )
+	{
+		csMessage.Format( _T( "Invalid pathname:\n\t%s\n" ), csPath );
 		fOut.WriteString( _T( ".\n" ) );
 		fOut.WriteString( csMessage );
 		fOut.WriteString( _T( ".\n" ) );
@@ -526,48 +687,66 @@ int _tmain( int argc, TCHAR* argv[], TCHAR* envp[] )
 
 	} else
 	{
-		csMessage.Format( _T( "Given pathname: %s\n" ), csPath );
+		csMessage.Format( _T( "Given pathname:\n\t%s\n" ), csPath );
 		fOut.WriteString( _T( ".\n" ) );
 		fOut.WriteString( csMessage );
-		fOut.WriteString( _T( ".\n" ) );
 	}
 
-
-	// record the given year
-	m_Date.Year = _tstol( argv[ 2 ] );
-
-	// record the given month of the year
-	m_Date.Month = _tstol( argv[ 3 ] );
-
-	// record the given day of the month
-	m_Date.Day = _tstol( argv[ 4 ] );
-
-	// If all of the date and time information is present,
-	// the Okay status of the date class will be set to true.
-	if ( m_Date.Okay == false )
+	// use Date Taken is true if there are only two parameters
+	m_bUseDateTaken = argc == 2;
+	if ( m_bUseDateTaken )
 	{
-		// let the user know the parameters did not make a valid date
-		// and error out
-		csMessage.Format
+		fOut.WriteString( _T( ".\n" ) );
+		fOut.WriteString
 		( 
-			_T( "Invalid date parameter(s) Year: %d, Month: %d, Day: %d\n" ), 
-			m_Date.Year, m_Date.Month, m_Date.Day
+			_T( ".\n" )
+			_T( "No date provided, using Date Taken\n" )
+			_T( "from each file instead, which means\n" )
+			_T( "there will not be a \"Corrected\" sub-\n" )
+			_T( "folder since no changes will be made\n" )
+			_T( "to the existing file's Date Taken.\n" )
+			_T( ".\n" )
 		);
-		fOut.WriteString( _T( ".\n" ) );
-		fOut.WriteString( csMessage );
-		fOut.WriteString( _T( ".\n" ) );
-		return 5;
 
-	} else // the given parameters worked
+	} else // year, month and day were provided
 	{
-		csMessage.Format
-		( 
-			_T( "The date parameters yielded: %s\n" ), 
-			m_Date.Date 
-		);
-		fOut.WriteString( _T( ".\n" ) );
-		fOut.WriteString( csMessage );
-		fOut.WriteString( _T( ".\n" ) );
+		// record the given year
+		m_Date.Year = _tstol( argv[ 2 ] );
+
+		// record the given month of the year
+		m_Date.Month = _tstol( argv[ 3 ] );
+
+		// record the given day of the month
+		m_Date.Day = _tstol( argv[ 4 ] );
+
+
+		// If all of the date and time information is present,
+		// the Okay status of the date class will be set to true.
+		if ( m_Date.Okay == false )
+		{
+			// let the user know the parameters did not make
+			// a valid date and error out
+			csMessage.Format
+			(
+				_T( "Invalid date parameter(s) Year:" )
+				_T( " %d, Month: %d, Day: %d\n" ),
+				m_Date.Year, m_Date.Month, m_Date.Day
+			);
+			fOut.WriteString( _T( ".\n" ) );
+			fOut.WriteString( csMessage );
+			fOut.WriteString( _T( ".\n" ) );
+			return 5;
+
+		} else // the given parameters worked
+		{
+			csMessage.Format
+			(
+				_T( "The date parameters yielded: %s\n" ),
+				m_Date.Date
+			);
+			fOut.WriteString( csMessage );
+			fOut.WriteString( _T( ".\n" ) );
+		}
 	}
 
 	// start up COM
