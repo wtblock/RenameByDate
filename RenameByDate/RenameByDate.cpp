@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "RenameByDate.h"
+#include "CHelper.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -189,8 +190,8 @@ CString GetCurrentDateTaken( LPCTSTR lpszPathName )
 CString RenameFile( LPCTSTR lpszPathName )
 {
 	CString value;
-	const CString csFolder = GetFolder( lpszPathName );
-	const CString csExtension = GetExtension( lpszPathName );
+	const CString csFolder = CHelper::GetFolder( lpszPathName );
+	const CString csExtension = CHelper::GetExtension( lpszPathName );
 	COleDateTime oDT = m_Date.DateAndTime;
 
 	// format the date in a globally sortable format suitable for a filename
@@ -263,7 +264,7 @@ bool Save( LPCTSTR lpszPathName, Gdiplus::Image* pImage )
 	// writing to the same file will fail, so save to a corrected folder
 	// below the image being corrected
 	const CString csCorrected = GetCorrectedFolder();
-	const CString csFolder = GetFolder( lpszPathName ) + csCorrected;
+	const CString csFolder = CHelper::GetFolder( lpszPathName ) + csCorrected;
 	if ( !::PathFileExists( csFolder ) )
 	{
 		if ( !CreatePath( csFolder ) )
@@ -273,7 +274,7 @@ bool Save( LPCTSTR lpszPathName, Gdiplus::Image* pImage )
 	}
 
 	// filename plus extension
-	const CString csData = GetDataName( lpszPathName );
+	const CString csData = CHelper::GetDataName( lpszPathName );
 
 	// create a new path from the pieces
 	const CString csPath = csFolder + _T( "\\" ) + csData;
@@ -302,7 +303,7 @@ void RecursePath( LPCTSTR path )
 	const int nCorrected = GetCorrectedFolderLength();
 
 	// get the folder which will trim any wild card data
-	CString csPathname = GetFolder( path );
+	CString csPathname = CHelper::GetFolder( path );
 
 	// wild cards are in use if the pathname does not equal the given path
 	const bool bWildCards = csPathname != path;
@@ -313,7 +314,7 @@ void RecursePath( LPCTSTR path )
 	CString strWildcard;
 	if ( bWildCards )
 	{
-		csData = GetDataName( path );
+		csData = CHelper::GetDataName( path );
 		strWildcard.Format( _T( "%s\\%s" ), csPathname, csData );
 
 	} else // no wild cards, just a folder
@@ -339,7 +340,7 @@ void RecursePath( LPCTSTR path )
 		{
 			// do not recurse into the corrected folder
 			const CString str = 
-				finder.GetFilePath().TrimRight( _T( "\\" ) );;
+				finder.GetFilePath().TrimRight( _T( "\\" ) );
 			if ( str.Right( nCorrected ) == csCorrected )
 			{
 				continue;
@@ -356,14 +357,14 @@ void RecursePath( LPCTSTR path )
 
 			} else // recurse into the new directory
 			{
-				RecursePath( str );
+				RecursePath( str + _T( "\\" ));
 			}
 
 		} else // write the properties if it is a valid extension
 		{
 			const CString csPath = finder.GetFilePath();
-			const CString csExt = GetExtension( csPath ).MakeLower();
-			const CString csFile = GetFileName( csPath );
+			const CString csExt = CHelper::GetExtension( csPath ).MakeLower();
+			const CString csFile = CHelper::GetFileName( csPath );
 
 			if ( -1 != csValidExt.Find( csExt ) )
 			{
@@ -455,12 +456,12 @@ void RecursePath( LPCTSTR path )
 
 				} else if ( csNew == csPath ) // the filename did not change
 				{
-					const CString csData = GetDataName( csNew );
+					const CString csData = CHelper::GetDataName( csNew );
 					csOutput.Format( _T( "Filename unchanged:\n\t%s\n" ), csData );
 
 				} else // let the user know about the new filename
 				{
-					const CString csData = GetDataName( csNew );
+					const CString csData = CHelper::GetDataName( csNew );
 					csOutput.Format( _T( "File renamed to:\n\t%s\n" ), csData );
 				}
 
@@ -601,11 +602,33 @@ int _tmain( int argc, TCHAR* argv[], TCHAR* envp[] )
 		return 2;
 	}
 
+	// do some common command line argument corrections
+	vector<CString> arrArgs = CHelper::CorrectedCommandLine( argc, argv );
+	size_t nArgs = arrArgs.size();
+
 	CStdioFile fOut( stdout );
+	CString csMessage;
+
+	// display the number of arguments if not 1 to help the user 
+	// understand what went wrong if there is an error in the
+	// command line syntax
+	if ( nArgs != 1 )
+	{
+		fOut.WriteString( _T( ".\n" ) );
+		csMessage.Format( _T( "The number of parameters are %d\n.\n" ), nArgs - 1 );
+		fOut.WriteString( csMessage );
+
+		// display the arguments
+		for ( int i = 1; i < nArgs; i++ )
+		{
+			csMessage.Format( _T( "Parameter %d is %s\n.\n" ), i, arrArgs[ i ] );
+			fOut.WriteString( csMessage );
+		}
+	}
 
 	// five arguments if specifying year, month, and day
 	// two arguments if using the existing date taken
-	if ( argc != 5 && argc != 2 )
+	if ( nArgs != 5 && nArgs != 2 )
 	{
 		fOut.WriteString( _T( ".\n" ) );
 		fOut.WriteString
@@ -681,17 +704,16 @@ int _tmain( int argc, TCHAR* argv[], TCHAR* envp[] )
 	}
 
 	// display the executable path
-	CString csMessage;
-	//csMessage.Format( _T( "Executable pathname: %s\n" ), argv[ 0 ] );
+	//csMessage.Format( _T( "Executable pathname: %s\n" ), arrArgs[ 0 ] );
 	//fOut.WriteString( _T( ".\n" ) );
 	//fOut.WriteString( csMessage );
 	//fOut.WriteString( _T( ".\n" ) );
 
 	// retrieve the pathname which may include wild cards
-	CString csPath = argv[ 1 ];
+	CString csPath = arrArgs[ 1 ];
 
 	// trim off any wild card data
-	const CString csFolder = GetFolder( csPath );
+	const CString csFolder = CHelper::GetFolder( csPath );
 
 	// test for current folder character (a period)
 	bool bExists = csPath == _T( "." );
@@ -727,7 +749,7 @@ int _tmain( int argc, TCHAR* argv[], TCHAR* envp[] )
 	}
 
 	// use Date Taken is true if there are only two parameters
-	m_bUseDateTaken = argc == 2;
+	m_bUseDateTaken = nArgs == 2;
 	if ( m_bUseDateTaken )
 	{
 		fOut.WriteString( _T( ".\n" ) );
@@ -754,13 +776,13 @@ int _tmain( int argc, TCHAR* argv[], TCHAR* envp[] )
 	} else // year, month and day were provided
 	{
 		// 4 digit year command line parameter
-		m_nYear = _tstol( argv[ 2 ] );
+		m_nYear = _tstol( arrArgs[ 2 ] );
 
 		// month of the year command line parameter (1..12)
-		m_nMonth = _tstol( argv[ 3 ] );
+		m_nMonth = _tstol( arrArgs[ 3 ] );
 
 		// day of the month command line parameter (0..31)
-		m_nDay = _tstol( argv[ 4 ] );
+		m_nDay = _tstol( arrArgs[ 4 ] );
 
 		// record the given year
 		m_Date.Year = m_nYear;
